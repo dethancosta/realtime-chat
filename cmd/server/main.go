@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
 	"strings"
 	"sync"
+
+	"github.com/dethancosta/rtchat/utils"
 )
 
 const (
@@ -38,12 +41,14 @@ func NewChatServer() *ChatServer {
 func (cs *ChatServer) acceptMsgs(name string) {
 	rdr := bufio.NewReader(cs.connPool[name])
 	defer cs.connPool[name].Close()
+
 	for {
 	select {
 		case <-cs.ctx.Done():
 			return
+
 		default:
-			msg, err := rdr.ReadString('\n')
+			msg, err := rdr.ReadBytes('\n')
 			if err == io.EOF {
 				log.Println(name + " left the chat.")
 				cs.mux.Lock()
@@ -54,7 +59,15 @@ func (cs *ChatServer) acceptMsgs(name string) {
 				log.Println(err.Error())
 				return
 			}
-			cs.sendChan <-msg
+
+			var message utils.Message
+			err = json.Unmarshal(msg, &message)
+			if err != nil {
+				log.Println(err.Error())
+				return
+			}
+
+			cs.sendChan <-message.String()
 		}
 	}
 }

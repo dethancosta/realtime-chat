@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"strings"
+
+	"github.com/dethancosta/rtchat/utils"
 )
 
 const (
@@ -95,9 +98,18 @@ func main() {
 				cancelMsg()
 				return
 			}
-			s = name + ": " + s
-			fmt.Println(s)
-			_, err = conn.Write([]byte(s + "\n"))
+			//s = name + ": " + s
+			msg := utils.NewMessage()
+			msg.Name = name
+			msg.Content = s
+			payload, err := json.Marshal(msg)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			// fmt.Println(s)
+			//_, err = conn.Write([]byte(s + "\n"))
+			_, err = conn.Write(append(payload, '\n'))
 			if err != nil {
 				log.Println(err)
 				return
