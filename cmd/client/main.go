@@ -83,6 +83,7 @@ func main() {
 	name = strings.TrimSpace(name)
 
 	ctx, cancelMsg := context.WithCancel(context.Background())
+	defer cancelMsg() // TODO delete?
 
 	sendCh := make(chan string)
 	recvCh := make(chan string)

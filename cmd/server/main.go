@@ -11,11 +11,27 @@ import (
 	"sync"
 
 	"github.com/dethancosta/rtchat/utils"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
 	HOST = "localhost"
 	PORT = "7007"
+
+	RedisAddress = "redis:6379"
+	RedisChannel = "message" // Default channel
+	RedisIdKey = "id"
+	RedisMessagesKEy = "messages"
+)
+
+var (
+	redisClient = redis.NewClient(&redis.Options{
+		Addr: RedisAddress,
+		Password: "",
+		DB: 0,
+	})
+
+	ctx = context.Background()
 )
 
 type ChatServer struct {
