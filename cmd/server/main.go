@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dethancosta/rtchat/utils"
 	"github.com/redis/go-redis/v9"
@@ -21,7 +23,7 @@ const (
 	RedisAddress = "redis:6379"
 	RedisChannel = "message" // Default channel
 	RedisIdKey = "id"
-	RedisMessagesKEy = "messages"
+	RedisMessagesKey = "messages"
 )
 
 var (
@@ -57,6 +59,7 @@ func NewChatServer() *ChatServer {
 func (cs *ChatServer) acceptMsgs(name string) {
 	rdr := bufio.NewReader(cs.connPool[name])
 	defer cs.connPool[name].Close()
+	defer cs.cancelFn()
 
 	for {
 	select {
@@ -83,20 +86,69 @@ func (cs *ChatServer) acceptMsgs(name string) {
 				return
 			}
 
-			cs.sendChan <-message.String()
+			message.Id, err = redisClient.Incr(ctx, RedisIdKey).Result()
+			message.Date = time.Now()
+			if err != nil {
+				log.Println(fmt.Errorf("Can't increment redis id key: %w", err))
+				return
+			}
+
+			data, err := json.Marshal(message)
+			if err != nil {
+				log.Println(fmt.Errorf("Can't increment redis id key: %w", err))
+				return
+			}
+			if err := redisClient.RPush(ctx, RedisMessagesKey, data).Err(); err != nil {
+				log.Printf("error pushing to redis: %v\n", err)
+				return
+			}
+
+			if err := redisClient.Publish(ctx, RedisChannel, data).Err(); err != nil {
+				log.Printf("error publishing to redis: %v\n", err)
+				return
+			}
+
+			//cs.sendChan <-message.String()
 		}
 	}
 }
 
 func (cs *ChatServer) sendMsg() {
+	defer cs.cancelFn()
+
+	pubsub := redisClient.Subscribe(ctx, RedisChannel)
 	for {
 		select {
 		case <-cs.ctx.Done():
 			return
+			/*
 		case msg := <-cs.sendChan:
 			cs.mux.RLock()
 			for _, v := range cs.connPool {
 				v.Write([]byte(msg))
+			}
+			cs.mux.RUnlock()
+			*/
+		default:
+			msg, err := pubsub.ReceiveMessage(ctx)
+			messages := make([]utils.Message, 1)
+			var m2 utils.Message
+			err = json.Unmarshal([]byte(msg.Payload), &m2)
+			if err != nil {
+				log.Printf("unmarshal in sendMsg: %v", err)
+				return
+			}
+
+			messages[0] = m2
+			jsonMsg, err := json.Marshal(messages) // TODO ensure slice is encoded correctly
+			if err != nil {
+				log.Printf("marshal in sendMsg: %v", err)
+				return
+			}
+
+			cs.mux.RLock()
+			for _, v := range cs.connPool {
+				v.Write(jsonMsg)	
 			}
 			cs.mux.RUnlock()
 		}
