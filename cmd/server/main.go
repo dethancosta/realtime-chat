@@ -58,7 +58,6 @@ func NewChatServer() *ChatServer {
 
 func (cs *ChatServer) acceptMsgs(name string) {
 	rdr := bufio.NewReader(cs.connPool[name])
-	defer cs.cancelFn()
 	defer func() {
 		cs.mux.Lock()
 		err := cs.connPool[name].Close()
@@ -185,6 +184,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer listener.Close()
 
 	server := NewChatServer()
 	go server.sendMsg()
