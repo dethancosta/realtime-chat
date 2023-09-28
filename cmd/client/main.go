@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -19,6 +20,7 @@ const (
 )
 
 func acceptInput(ctx context.Context, ch chan string, rdr *bufio.Reader) {
+	defer cancelMsg()
 	for {
 
 		select {
@@ -27,7 +29,7 @@ func acceptInput(ctx context.Context, ch chan string, rdr *bufio.Reader) {
 		default:
 			toSend, err := rdr.ReadString('\n')
 			if err != nil {
-				log.Println(err.Error())
+				log.Println(fmt.Errorf("acceptInput: %w", err))
 				ch <- ""
 				return
 			}
@@ -37,7 +39,14 @@ func acceptInput(ctx context.Context, ch chan string, rdr *bufio.Reader) {
 	}
 }
 
+func formatMessage(msg utils.Message) string {
+	st := "----- " + msg.Name + " ----- " + msg.Date.String() + "\n"
+	st += msg.Content + "\n" + strings.Repeat("-", len(st))
+	return st
+}
+
 func handleMsg(ctx context.Context, ch chan string, rdr *bufio.Reader) {
+	defer cancelMsg()
 	for {
 		select {
 		case <-ctx.Done():
@@ -45,30 +54,58 @@ func handleMsg(ctx context.Context, ch chan string, rdr *bufio.Reader) {
 		default:
 
 			recv, err := rdr.ReadString('\n')
-			if err != nil {
+			if err == io.EOF {
 				ch <- ""
-				log.Println(err)
+				log.Println("handleMsg: EOF")
 				return
 			}
-			recv = strings.TrimSpace(recv)
+			if err != nil {
+				ch <- ""
+				log.Println(fmt.Errorf("handleMsg: %w", err))
+				return
+			}
 
-			ch <- recv
+			recv = strings.TrimSpace(recv)
+			var msgArray []utils.Message
+
+			err = json.Unmarshal([]byte(recv), &msgArray)
+			if err != nil {
+				ch <- ""
+				log.Println("error unmarshalling: " + err.Error())
+				return
+			}
+
+			for m := range msgArray {
+				ch <- formatMessage(msgArray[m])
+			}
 		}
 	}
 }
 
+var (
+	ctx, cancelMsg = context.WithCancel(context.Background())
+	name string
+)
+
 func main() {
 	conn, err := net.Dial("tcp", HOST+":"+PORT)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(fmt.Errorf("couldn't establish connection: %w", err))
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer func() {
+		err = conn.Close()
+		if err != nil {
+			log.Printf("error closing connection: %s\n", err.Error())
+		}
+	}()
+	defer cancelMsg()
+
 	sc := bufio.NewReader(os.Stdin)
 	rdr := bufio.NewReader(conn)
 
 	fmt.Print("name: ")
-	name, err := sc.ReadString('\n')
+	name, err = sc.ReadString('\n')
 	if err != nil {
 		log.Fatal(err)
 		os.Exit(1)
@@ -76,14 +113,11 @@ func main() {
 	
 	_, err = conn.Write([]byte(name))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(fmt.Errorf("couldn't write to conn: %w", err))
 		os.Exit(1)
 	}
 
 	name = strings.TrimSpace(name)
-
-	ctx, cancelMsg := context.WithCancel(context.Background())
-	defer cancelMsg() // TODO delete?
 
 	sendCh := make(chan string)
 	recvCh := make(chan string)
@@ -99,20 +133,19 @@ func main() {
 				cancelMsg()
 				return
 			}
-			//s = name + ": " + s
+
 			msg := utils.NewMessage()
 			msg.Name = name
 			msg.Content = s
 			payload, err := json.Marshal(msg)
 			if err != nil {
-				log.Println(err)
+				log.Println(fmt.Errorf("main marshal: %w", err))
 				return
 			}
-			// fmt.Println(s)
-			//_, err = conn.Write([]byte(s + "\n"))
+
 			_, err = conn.Write(append(payload, '\n'))
 			if err != nil {
-				log.Println(err)
+				log.Println(fmt.Errorf("conn.Write in main: %w", err))
 				return
 			}
 		case r := <-recvCh:

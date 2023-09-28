@@ -1,4 +1,5 @@
 server:
+	brew services start redis
 	go run ./cmd/server
 
 client:

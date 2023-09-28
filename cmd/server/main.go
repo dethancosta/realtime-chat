@@ -20,7 +20,7 @@ const (
 	HOST = "localhost"
 	PORT = "7007"
 
-	RedisAddress = "redis:6379"
+	RedisAddress = "localhost:6379"
 	RedisChannel = "message" // Default channel
 	RedisIdKey = "id"
 	RedisMessagesKey = "messages"
@@ -58,8 +58,16 @@ func NewChatServer() *ChatServer {
 
 func (cs *ChatServer) acceptMsgs(name string) {
 	rdr := bufio.NewReader(cs.connPool[name])
-	defer cs.connPool[name].Close()
 	defer cs.cancelFn()
+	defer func() {
+		cs.mux.Lock()
+		err := cs.connPool[name].Close()
+		if err != nil {
+			log.Printf("error closing connection: %s", err.Error())
+		}
+		delete(cs.connPool, name)
+		cs.mux.Unlock()
+	}()
 
 	for {
 	select {
@@ -70,9 +78,6 @@ func (cs *ChatServer) acceptMsgs(name string) {
 			msg, err := rdr.ReadBytes('\n')
 			if err == io.EOF {
 				log.Println(name + " left the chat.")
-				cs.mux.Lock()
-				delete(cs.connPool, name)
-				cs.mux.Unlock()
 				return
 			} else if err != nil {
 				log.Println(err.Error())
@@ -85,6 +90,8 @@ func (cs *ChatServer) acceptMsgs(name string) {
 				log.Println(err.Error())
 				return
 			}
+			// TODO delete this line
+			log.Println(message.Name + " sent " + message.Content)
 
 			message.Id, err = redisClient.Incr(ctx, RedisIdKey).Result()
 			message.Date = time.Now()
@@ -145,10 +152,11 @@ func (cs *ChatServer) sendMsg() {
 				log.Printf("marshal in sendMsg: %v", err)
 				return
 			}
+			jsonMsg = append(jsonMsg, '\n')
 
 			cs.mux.RLock()
 			for _, v := range cs.connPool {
-				v.Write(jsonMsg)	
+				v.Write(jsonMsg)
 			}
 			cs.mux.RUnlock()
 		}
