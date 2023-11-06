@@ -22,3 +22,11 @@ go.work
 
 # Redis rdb dump
 dump.rdb
+
+#Macs are weird
+.DS_Store
+
+#VHS stuff
+demo.tape
+demo2.tape
+demo.gif
